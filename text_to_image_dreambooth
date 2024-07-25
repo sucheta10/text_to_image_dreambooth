@@ -1,0 +1,151 @@
+# Install necessary libraries
+!pip install diffusers
+!pip install transformers
+!pip install accelerate
+!pip install torch
+!pip install matplotlib
+
+import os
+from PIL import Image
+import matplotlib.pyplot as plt
+from diffusers import StableDiffusionPipeline
+import torch
+# Authenticate and mount Google Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Set up DreamBooth
+!pip install git+https://github.com/huggingface/diffusers
+!pip install git+https://github.com/huggingface/transformers
+!pip install git+https://github.com/huggingface/accelerate
+
+# Define the directory path containing the images
+image_dir = '/content/drive/MyDrive/text_to_image'
+
+'''
+# Load all images from the directory
+# os.listdir(image_dir):This function from the os module lists all files and directories in the specified directory 'image_dir'.
+# for img in os.listdir(image_dir):This is a loop that iterates over each item (file or directory) in the list returned by 'os.listdir(image_dir)'.
+'img' is a variable that takes the value of each item in the list on each iteration.
+
+# if img.endswith(('jpg', 'jpeg', 'png')):This condition checks whether the current item (img) ends with any of the specified extensions ('jpg', 'jpeg', or 'png').
+'img.endswith(('jpg', 'jpeg', 'png'))' returns True if 'img' is a string ending with one of these extensions, and False otherwise.
+
+# os.path.join(image_dir, img):This function from the 'os.path' module joins the directory path 'image_dir' and the file name 'img' to create a full path to the file.
+
+# [os.path.join(image_dir, img) for img in os.listdir(image_dir) if img.endswith(('jpg', 'jpeg', 'png'))]:This is a list comprehension that combines the previous steps into a single line to generate a list of full file paths.
+It iterates over each item in the directory, checks if the item is an image with the specified extensions, and if so, constructs the full path to the image.
+The result is a list of full paths to image files in the specified directory.'''
+image_paths = [os.path.join(image_dir, img) for img in os.listdir(image_dir) if img.endswith(('jpg', 'jpeg', 'png'))]
+
+# Define the prompts for each image
+prompts = [
+    "A futuristic cityscape at night",
+    "A serene beach during sunset",
+    "A bustling market in an ancient city",
+    "A magical forest with glowing plants",
+    "A space station orbiting a distant planet",
+    "An astronaut diving into an interstellar black hole",
+    "A giant golden black hole"
+]
+
+'''# Ensure the number of prompts matches the number of images.
+This block of code ensures that there are enough prompts for each image path.
+If there are more images than prompts, it repeats the prompts to match the number of images.
+
+# if len(prompts) < len(image_paths):
+This checks if the number of prompts is less than the number of image paths.
+'len(prompts)' returns the number of prompts.
+'len(image_paths)' returns the number of image paths.
+
+# prompts * (len(image_paths) // len(prompts)):
+'len(image_paths) // len(prompts)' calculates how many times the full list of prompts can be repeated to cover all image paths.
+The '//' operator performs integer division, which gives the number of full repetitions.
+'prompts * (len(image_paths) // len(prompts))' creates a new list by repeating the prompts list this many times.
+
+# prompts[:len(image_paths) % len(prompts)]:
+'len(image_paths) % len(prompts)' calculates the remainder when the number of image paths is divided by the number of prompts.
+The '%' operator gives the remainder.
+'prompts[:len(image_paths) % len(prompts)]' takes the first few elements from the prompts list to match the remainder.
+
+# The full repeated prompts list and the additional required prompts are combined using the '+' operator.'''
+if len(prompts) < len(image_paths):
+    prompts = prompts * (len(image_paths) // len(prompts)) + prompts[:len(image_paths) % len(prompts)]
+
+'''# Load images
+# Image.open(image_path):
+'Image.open()' is a function from the PIL (or Pillow, which is the modern version) library used to open and identify an image file.
+'image_path' is a variable representing the file path of an image.
+
+# for image_path in image_paths:
+This is a loop that iterates over each item in the image_paths list.
+'image_path' is a variable that takes the value of each file path in the 'image_paths' list on each iteration.
+
+# 'Image.open(image_path)' for image_path in 'image_paths' is the expression applied to each 'image_path' in the 'image_paths' list.
+This creates a new list where each element is the result of 'Image.open(image_path)'.
+# The result is a list of 'Image' objects, where each object represents an opened image file.'''
+images = [Image.open(image_path) for image_path in image_paths]
+
+# Load the DreamBooth model
+pipe = StableDiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4")
+# Moves the entire pipeline (model and other components) to the GPU for faster computation.
+# The "cuda" argument specifies that the model should be moved to a CUDA-enabled GPU.
+pipe = pipe.to("cuda")
+
+# Generate new images based on the prompts
+generated_images = []
+'''# zip(images, prompts): Combines the 'images' and 'prompts' lists into pairs of '(image, prompt)'. Each iteration yields one image and one prompt.
+# enumerate(): Adds an index 'i' to each pair, starting from 0. This index helps in tracking and saving the generated images with unique filenames.'''
+for i, (image, prompt) in enumerate(zip(images, prompts)):
+    # Preprocess the image
+    image = image.resize((512, 512))
+    '''# pipe.feature_extractor(): Prepares the image for the model by converting it into the appropriate format.
+                                  It uses the feature extractor from the pipeline to transform the image into tensor format.
+      # images=[image]: Encapsulates the image in a list, as the feature extractor expects a list of images.
+      # return_tensors="pt": Specifies that the output should be in PyTorch tensor format.
+      # ["pixel_values"]: Extracts the tensor values from the output dictionary returned by the feature extractor.
+      # .to("cuda"): Moves the tensor to the GPU for faster processing. This is crucial for leveraging GPU acceleration.'''
+    image = pipe.feature_extractor(images=[image], return_tensors="pt")["pixel_values"].to("cuda")
+
+    # Generate the new image
+    '''Enables automatic mixed precision (AMP) for GPU computations. 
+    This optimizes performance by using lower precision arithmetic when possible while maintaining model accuracy.'''
+    with torch.autocast("cuda"):
+        '''# pipe(prompt=prompt, init_image=image, strength=0.75): Calls the pipe object (which is an instance of StableDiffusionPipeline) 
+                                                              to generate a new image based on the provided prompt and the initial image.
+        # prompt=prompt: Provides the textual prompt that describes what the generated image should depict.
+        # init_image=image: Supplies the preprocessed image as the initial input for the generation process.
+        # strength=0.75: Controls how much the generated image should deviate from the initial image. 
+                        A higher value will result in more alterations based on the prompt.
+        # .images[0]: Retrieves the generated image from the output of the pipe call. 
+                     The output is typically a list of generated images, and [0] gets the first (and usually the only) image in this case.'''
+        generated_image = pipe(prompt=prompt, init_image=image, strength=0.75).images[0]
+    
+    generated_images.append(generated_image) # Adds the newly generated image to the 'generated_images' list for later use, such as saving or displaying.
+    
+    # Save the generated image
+    generated_image.save(f'/content/drive/MyDrive/generated_images/generated_image_{i+1}.jpg')
+
+# Display the generated images
+'''len(generated_images): Calculates the total number of generated images.
+This will be used to determine how many subplots are needed for displaying the images.'''
+num_images = len(generated_images)
+'''# plt.subplots(): Creates a grid of subplots for displaying images.
+# 1: Indicates the number of rows in the subplot grid (here, it's 1 row).
+# num_images: Indicates the number of columns in the subplot grid, equal to the number of images.
+# figsize=(20, 5 * (num_images // 5 + 1)): Sets the size of the entire figure. 
+                                           The width is fixed at 20 inches, and the height is dynamically calculated based on the number of images.
+                                           The formula ensures enough height to display all images comfortably.
+# 5 * (num_images // 5 + 1): Adjusts the height based on the number of images. 
+                             This ensures that if there are more than 5 images, the height is increased to fit them all.'''
+fig, axes = plt.subplots(1, num_images, figsize=(20, 5 * (num_images // 5 + 1)))
+'''# zip(axes, generated_images, prompts): Combines the axes, generated images, and prompts into tuples.
+                                           Each tuple contains an axis object, a generated image, and a prompt.
+# for ax, img, prompt in zip(...): Iterates over each tuple, unpacking it into ax (axis object), img (generated image), and prompt (associated prompt).'''
+for ax, img, prompt in zip(axes, generated_images, prompts):
+    ax.imshow(img)#  Displays the image img on the current axis ax.
+    ax.axis('off')# Hides the axis ticks and labels to focus solely on the image.
+    ax.set_title(prompt, fontsize=10)#Sets the title of the subplot to the prompt associated with the image, using a font size of 10.
+plt.show()# Renders and displays the entire figure with all subplots
+
+print("Image generation completed.")
